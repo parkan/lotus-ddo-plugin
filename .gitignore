@@ -1,0 +1,9 @@
+plans/
+downloads/
+.env
+.env.local
+.env.*.local
+lotus-ddo-plugin
+.DS_Store
+*.swp
+*.swo
