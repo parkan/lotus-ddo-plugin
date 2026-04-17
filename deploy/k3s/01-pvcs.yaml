@@ -1,0 +1,53 @@
+# PVCs sized for a single-sector calibnet SP on a 3.84 TB NVMe.
+# Total: ~3.15 TiB; leaves ~350 GB for OS/logs/chain growth.
+#
+# local-path provisioner is RWO only -- all workloads that need these
+# must live in the same pod.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lotus-data
+  namespace: lotus-ddo
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 500Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: proof-params
+  namespace: lotus-ddo
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: miner-data
+  namespace: lotus-ddo
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2500Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ddo-downloads
+  namespace: lotus-ddo
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 100Gi

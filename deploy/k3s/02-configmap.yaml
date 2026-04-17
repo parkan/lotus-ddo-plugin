@@ -1,0 +1,71 @@
+# Plugin settings + lotus/miner config.toml.
+#
+# PROVIDER_ID and DDO_CONTRACT_F4 are left empty -- set them after the
+# miner actor is created and the DDO contract id is resolved:
+#   kubectl -n lotus-ddo patch configmap fgw-config --type=merge \
+#     -p '{"data":{"settings.env":"...PROVIDER_ID=12345\nDDO_CONTRACT_F4=f410f...\n..."}}'
+# (or simpler: edit the file and re-apply this manifest, then rollout restart).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ddo-config
+  namespace: lotus-ddo
+data:
+  # Calibnet addresses -- owner and worker of the miner actor.
+  # Leave empty until wallets are generated; miner init waits for both
+  # to appear in the daemon keystore before running.
+  OWNER_ADDR: ""
+  WORKER_ADDR: ""
+
+  settings.env: |
+    # Calibnet DDO contract.
+    RPC_URL=http://localhost:1234/rpc/v1
+    CONTRACT_ADDRESS=0x889fD50196BE300D06dc4b8F0F17fdB0af587095
+
+    # Local lotus + miner (same pod).
+    LOTUS_API_URL=http://localhost:1234/rpc/v1
+    MINER_API_URL=http://localhost:2345/rpc/v0
+
+    # Filled in after bootstrap -- see comment at top of file.
+    PROVIDER_ID=
+    DDO_CONTRACT_F4=
+
+    # Gating. CLIENT_ALLOWLIST: comma-separated 0x addrs of clients whose
+    # allocations we accept. Empty = accept any client (NOT recommended).
+    CLIENT_ALLOWLIST=
+    # Cap at 32 GiB padded -- single-sector deployment.
+    MAX_PIECE_SIZE=34359738368
+    # ~540 days -- refuse >1y pins.
+    MAX_TERM_MAX=1555200
+
+    POLL_INTERVAL=30s
+    DOWNLOAD_DIR=/downloads
+
+  lotus-config.toml: |
+    [API]
+      ListenAddress = "/ip4/0.0.0.0/tcp/1234/http"
+      Timeout = "30s"
+
+    [Libp2p]
+      ListenAddresses = ["/ip4/0.0.0.0/tcp/1235"]
+
+    [ChainIndexer]
+      EnableIndexer = true
+
+  miner-config.toml: |
+    [API]
+      ListenAddress = "/ip4/0.0.0.0/tcp/2345/http"
+
+    [Libp2p]
+      ListenAddresses = ["/ip4/0.0.0.0/tcp/2346"]
+
+    [Sealing]
+      MaxSealingSectors = 1
+      MaxSealingSectorsForDeals = 1
+      MaxWaitDealsSectors = 1
+      WaitDealsDelay = "1h0m0s"
+      AlwaysKeepUnsealedCopy = true
+
+    [Storage]
+      ParallelFetchLimit = 1

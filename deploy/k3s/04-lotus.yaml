@@ -1,0 +1,339 @@
+# Single-pod, three-container deployment: lotus-daemon + lotus-miner +
+# ddo-plugin. They share the pod's network namespace so cross-service
+# addressing uses localhost.
+#
+# Bootstrap sequence (operator):
+#  1. Fund calibnet wallet(s) at https://faucet.calibnet.chainsafe-fil.io/
+#  2. Generate owner + worker wallets offline:
+#        lotus wallet new bls  # owner
+#        lotus wallet new bls  # worker
+#     (or derive from seed -- either way, export both to JSON).
+#  3. Create the wallet-keys secret:
+#        kubectl -n lotus-ddo create secret generic wallet-keys \
+#          --from-file=owner.key=./owner.key \
+#          --from-file=worker.key=./worker.key
+#  4. Edit 02-configmap.yaml to set OWNER_ADDR and WORKER_ADDR (added below),
+#     PROVIDER_ID (empty -- filled in after miner init), DDO_CONTRACT_F4 (same).
+#  5. Apply 00..04 manifests.
+#  6. Daemon will sync calibnet (set SNAPSHOT_URL below to skip cold sync).
+#  7. Daemon auto-imports wallet keys once synced.
+#  8. Miner auto-inits when wallets appear + enough FIL for actor creation.
+#  9. `kubectl -n lotus-ddo logs -f deployment/lotus -c lotus-miner` to watch.
+# 10. Once miner is up, grab PROVIDER_ID via `lotus-miner info` and
+#     DDO_CONTRACT_F4 via `lotus evm stat 0x889fD50196BE300D06dc4b8F0F17fdB0af587095`.
+# 11. Patch the configmap and rollout restart the plugin container.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lotus-api
+  namespace: lotus-ddo
+spec:
+  selector:
+    app: lotus
+  ports:
+    - name: api
+      port: 1234
+      targetPort: 1234
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: miner-api
+  namespace: lotus-ddo
+spec:
+  selector:
+    app: lotus
+  ports:
+    - name: api
+      port: 2345
+      targetPort: 2345
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lotus
+  namespace: lotus-ddo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # single-writer state; never run two instances
+  selector:
+    matchLabels:
+      app: lotus
+  template:
+    metadata:
+      labels:
+        app: lotus
+    spec:
+      # Bootstrap ordering within the pod is handled by wait-loops inside
+      # each container's entrypoint, since initContainers can't depend on
+      # a later-running container.
+      containers:
+
+        - name: lotus-daemon
+          image: docker.io/filecoin/lotus-all-in-one:v1.34.2-calibnet
+          command: [bash, -c]
+          args:
+            - |
+              set -eu
+
+              mkdir -p /lotus/config
+              if [ ! -f /lotus/config/config.toml ]; then
+                cp /config/lotus-config.toml /lotus/config/config.toml
+              fi
+
+              IMPORT_FLAG=""
+              if [ ! -d /lotus/datastore ] && [ -n "${SNAPSHOT_URL:-}" ]; then
+                echo "chain datastore empty; importing snapshot from $SNAPSHOT_URL"
+                IMPORT_FLAG="--import-snapshot=$SNAPSHOT_URL"
+              fi
+
+              # run daemon in background so we can import wallets once API is up
+              lotus daemon $IMPORT_FLAG &
+              DAEMON_PID=$!
+
+              # wait for daemon API
+              echo "waiting for daemon API..."
+              until lotus auth api-info --perm read >/dev/null 2>&1; do
+                sleep 5
+                if ! kill -0 $DAEMON_PID 2>/dev/null; then
+                  echo "daemon died"; exit 1
+                fi
+              done
+              echo "daemon API is up"
+
+              # idempotent wallet import
+              if [ -d /wallet-ro ]; then
+                for f in /wallet-ro/*.key; do
+                  [ -f "$f" ] || continue
+                  name=$(basename "$f")
+                  lotus wallet import --format=json-lotus "$f" 2>/dev/null \
+                    && echo "imported $name" \
+                    || echo "$name already imported (or invalid)"
+                done
+              fi
+
+              wait $DAEMON_PID
+          env:
+            - name: LOTUS_PATH
+              value: /lotus
+            - name: FIL_PROOFS_PARAMETER_CACHE
+              value: /proof-params
+            - name: LOTUS_SKIP_GENESIS_CHECK
+              value: "_yes_"
+            # Optional: calibnet snapshot URL. Leave empty to sync from genesis.
+            # Example: https://snapshots.calibrationnet.filops.net/minimal/latest
+            - name: SNAPSHOT_URL
+              value: ""
+          ports:
+            - containerPort: 1234
+              name: api
+            - containerPort: 1235
+              name: libp2p
+          volumeMounts:
+            - name: lotus-data
+              mountPath: /lotus
+            - name: proof-params
+              mountPath: /proof-params
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: wallet-ro
+              mountPath: /wallet-ro
+              readOnly: true
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+            limits:
+              cpu: "8"
+              memory: 32Gi
+          readinessProbe:
+            tcpSocket:
+              port: 1234
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: 1234
+            initialDelaySeconds: 300
+            periodSeconds: 60
+            failureThreshold: 10
+
+        - name: lotus-miner
+          image: docker.io/filecoin/lotus-all-in-one:v1.34.2-calibnet
+          command: [bash, -c]
+          args:
+            - |
+              set -eu
+
+              mkdir -p /lotus-miner/config
+              if [ ! -f /lotus-miner/config/config.toml ]; then
+                cp /config/miner-config.toml /lotus-miner/config/config.toml
+              fi
+
+              echo "waiting for lotus daemon API..."
+              until lotus auth api-info --perm admin >/dev/null 2>&1; do
+                sleep 10
+              done
+
+              if [ ! -f /lotus-miner/api ]; then
+                : "${OWNER_ADDR:?set OWNER_ADDR in configmap for first-time init}"
+                : "${WORKER_ADDR:?set WORKER_ADDR in configmap for first-time init}"
+
+                echo "waiting for owner wallet $OWNER_ADDR in daemon keystore..."
+                until lotus wallet list 2>/dev/null | grep -q "$OWNER_ADDR"; do
+                  sleep 10
+                done
+                echo "waiting for worker wallet $WORKER_ADDR..."
+                until lotus wallet list 2>/dev/null | grep -q "$WORKER_ADDR"; do
+                  sleep 10
+                done
+
+                # naive balance check -- give up early rather than spam init
+                BAL=$(lotus wallet balance "$OWNER_ADDR" 2>/dev/null | awk '{print $1}')
+                echo "owner balance: $BAL FIL"
+
+                echo "running lotus-miner init (sector-size=32GiB)..."
+                lotus-miner init \
+                  --owner="$OWNER_ADDR" \
+                  --worker="$WORKER_ADDR" \
+                  --sector-size=32GiB \
+                  --from="$OWNER_ADDR"
+                echo "miner init complete"
+              fi
+
+              exec lotus-miner run --nosync
+          env:
+            - name: LOTUS_PATH
+              value: /lotus
+            - name: LOTUS_MINER_PATH
+              value: /lotus-miner
+            - name: FIL_PROOFS_PARAMETER_CACHE
+              value: /proof-params
+            # GPU proving is off by default in lotus-miner run, but make
+            # that explicit so config inspection reveals the intent.
+            - name: BELLMAN_NO_GPU
+              value: "true"
+            - name: FIL_PROOFS_USE_GPU_COLUMN_BUILDER
+              value: "0"
+            - name: FIL_PROOFS_USE_GPU_TREE_BUILDER
+              value: "0"
+            - name: FIL_PROOFS_USE_MULTICORE_SDR
+              value: "1"
+            - name: OWNER_ADDR
+              valueFrom:
+                configMapKeyRef:
+                  name: ddo-config
+                  key: OWNER_ADDR
+                  optional: true
+            - name: WORKER_ADDR
+              valueFrom:
+                configMapKeyRef:
+                  name: ddo-config
+                  key: WORKER_ADDR
+                  optional: true
+          ports:
+            - containerPort: 2345
+              name: api
+            - containerPort: 2346
+              name: libp2p
+          volumeMounts:
+            - name: lotus-data
+              mountPath: /lotus
+              readOnly: true # miner reads daemon API token + keystore
+            - name: miner-data
+              mountPath: /lotus-miner
+            - name: proof-params
+              mountPath: /proof-params
+            - name: config
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests:
+              cpu: "4"
+              memory: 8Gi
+            limits:
+              cpu: "48"
+              memory: 192Gi # 32 GiB PC1 peak ~64-128 GB
+          readinessProbe:
+            tcpSocket:
+              port: 2345
+            initialDelaySeconds: 180
+            periodSeconds: 30
+          livenessProbe:
+            tcpSocket:
+              port: 2345
+            initialDelaySeconds: 600
+            periodSeconds: 120
+            failureThreshold: 10
+
+        - name: ddo-plugin
+          image: localhost/lotus-ddo-plugin:local
+          imagePullPolicy: IfNotPresent
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+
+              echo "waiting for lotus daemon token..."
+              until [ -s /lotus/token ]; do sleep 5; done
+              echo "waiting for miner token..."
+              until [ -s /lotus-miner/token ]; do sleep 5; done
+
+              export LOTUS_API_TOKEN=$(cat /lotus/token)
+              export MINER_API_TOKEN=$(cat /lotus-miner/token)
+
+              set -a
+              . /app/config/settings.env
+              set +a
+
+              if [ -z "$PROVIDER_ID" ] || [ -z "$DDO_CONTRACT_F4" ]; then
+                echo "FATAL: PROVIDER_ID and DDO_CONTRACT_F4 must be set in configmap"
+                echo "  PROVIDER_ID=$PROVIDER_ID"
+                echo "  DDO_CONTRACT_F4=$DDO_CONTRACT_F4"
+                exit 1
+              fi
+
+              exec /lotus-ddo-plugin
+          volumeMounts:
+            - name: lotus-data
+              mountPath: /lotus
+              readOnly: true
+            - name: miner-data
+              mountPath: /lotus-miner
+              readOnly: true
+            - name: ddo-downloads
+              mountPath: /downloads
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+          resources:
+            requests:
+              cpu: "250m"
+              memory: 512Mi
+            limits:
+              cpu: "4"
+              memory: 4Gi
+
+      volumes:
+        - name: lotus-data
+          persistentVolumeClaim:
+            claimName: lotus-data
+        - name: miner-data
+          persistentVolumeClaim:
+            claimName: miner-data
+        - name: proof-params
+          persistentVolumeClaim:
+            claimName: proof-params
+        - name: ddo-downloads
+          persistentVolumeClaim:
+            claimName: ddo-downloads
+        - name: config
+          configMap:
+            name: ddo-config
+        - name: wallet-ro
+          secret:
+            secretName: wallet-keys
+            optional: true
