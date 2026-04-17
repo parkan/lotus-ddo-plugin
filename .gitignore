@@ -7,3 +7,4 @@ lotus-ddo-plugin
 .DS_Store
 *.swp
 *.swo
+.wallets.notcommitted
