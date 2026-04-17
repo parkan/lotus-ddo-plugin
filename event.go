@@ -109,12 +109,31 @@ func parseAllocationCreatedLog(vLog types.Log) (*AllocationCreatedEvent, error) 
 }
 
 // fetchAllocationEvents queries the Ethereum client for AllocationCreated logs within a block range.
-func fetchAllocationEvents(ctx context.Context, client *ethclient.Client, contractAddr common.Address, fromBlock, toBlock *big.Int) ([]AllocationCreatedEvent, error) {
+// providerID is always pushed to Topics[3] so the RPC node pre-filters by provider.
+// clientAllowlist, if non-empty, is pushed to Topics[1] so only allowlisted clients are returned.
+func fetchAllocationEvents(ctx context.Context, client *ethclient.Client, contractAddr common.Address, fromBlock, toBlock *big.Int, providerID uint64, clientAllowlist map[common.Address]struct{}) ([]AllocationCreatedEvent, error) {
+	// Topic positions: [0]=signature, [1]=client, [2]=allocationID, [3]=provider.
+	topics := make([][]common.Hash, 4)
+	topics[0] = []common.Hash{allocationCreatedTopic}
+	if len(clientAllowlist) > 0 {
+		clientTopics := make([]common.Hash, 0, len(clientAllowlist))
+		for addr := range clientAllowlist {
+			var h common.Hash
+			copy(h[12:], addr[:]) // 20-byte addr right-aligned in 32-byte topic
+			clientTopics = append(clientTopics, h)
+		}
+		topics[1] = clientTopics
+	}
+	// Topics[2] (allocationID) left nil -- match any.
+	var providerTopic common.Hash
+	binary.BigEndian.PutUint64(providerTopic[24:], providerID)
+	topics[3] = []common.Hash{providerTopic}
+
 	query := ethereum.FilterQuery{
 		FromBlock: fromBlock,
 		ToBlock:   toBlock,
 		Addresses: []common.Address{contractAddr},
-		Topics:    [][]common.Hash{{allocationCreatedTopic}},
+		Topics:    topics,
 	}
 
 	logs, err := client.FilterLogs(ctx, query)

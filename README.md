@@ -68,6 +68,20 @@ cp .env.example .env
 | `DOWNLOAD_DIR` | `./downloads` | Temp directory for downloaded piece data |
 | `START_EPOCH_BUFFER` | `5760` (~2 days) | Epochs after chain head for deal start |
 | `END_EPOCH_BUFFER` | `1152000` (~400 days) | Epochs after chain head for deal end |
+| `CLIENT_ALLOWLIST` | *(unset = any client)* | Comma-separated 0x client addresses. Only allocations whose `client` matches one of these are processed. Also pushed to `eth_getLogs` `Topics[1]` for RPC-side pre-filtering. |
+| `MIN_PIECE_SIZE` | `0` (no bound) | Reject pieces with padded size smaller than this many bytes. |
+| `MAX_PIECE_SIZE` | `0` (no bound) | Reject pieces with padded size larger than this many bytes. |
+| `MAX_TERM_MAX` | `0` (no bound) | Reject allocations whose `term_max` exceeds this many epochs. |
+
+### Access Control / Gating
+
+By default, the plugin accepts any `AllocationCreated` event naming your `PROVIDER_ID` as the target. Anyone on-chain can emit such an event, so for test deployments or restricted-use SPs you almost certainly want to set an allowlist:
+
+- **`CLIENT_ALLOWLIST`** — the most important gate. When set, events from clients not on the list are ignored both at the RPC layer (pushed into the topic filter) and in the Go loop (defense-in-depth).
+- **`MIN_PIECE_SIZE` / `MAX_PIECE_SIZE`** — useful for bounding the workload per allocation (e.g. to refuse 64 GiB pieces from a test client with a 8 GiB budget).
+- **`MAX_TERM_MAX`** — prevents a client from pinning your miner to a >1-year term.
+
+The plugin also pushes `PROVIDER_ID` into `Topics[3]` unconditionally, so the RPC node no longer returns events targeting other providers.
 
 ### Generating API Tokens
 

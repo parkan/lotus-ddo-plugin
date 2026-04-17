@@ -9,15 +9,16 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	lapi "github.com/filecoin-project/lotus/api"
-	"github.com/joho/godotenv"
 	lclient "github.com/filecoin-project/lotus/api/client"
 	"github.com/filecoin-project/lotus/api/v0api"
+	"github.com/joho/godotenv"
 )
 
 type config struct {
@@ -34,6 +35,12 @@ type config struct {
 	DownloadDir      string
 	StartEpochBuffer int64
 	EndEpochBuffer   int64
+
+	// Access control. Zero-value = disabled (upstream-compatible default).
+	ClientAllowlist map[common.Address]struct{}
+	MinPieceSize    uint64 // bytes, padded (matches event.Size semantics)
+	MaxPieceSize    uint64
+	MaxTermMax      int64 // epochs
 }
 
 func loadConfig() (*config, error) {
@@ -122,6 +129,47 @@ func loadConfig() (*config, error) {
 		cfg.EndEpochBuffer = n
 	}
 
+	if v := os.Getenv("CLIENT_ALLOWLIST"); v != "" {
+		cfg.ClientAllowlist = make(map[common.Address]struct{})
+		for _, s := range strings.Split(v, ",") {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			if !common.IsHexAddress(s) {
+				return nil, fmt.Errorf("CLIENT_ALLOWLIST entry %q is not a valid hex address", s)
+			}
+			cfg.ClientAllowlist[common.HexToAddress(s)] = struct{}{}
+		}
+		if len(cfg.ClientAllowlist) == 0 {
+			return nil, fmt.Errorf("CLIENT_ALLOWLIST is set but contains no valid entries")
+		}
+	}
+	if v := os.Getenv("MIN_PIECE_SIZE"); v != "" {
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("MIN_PIECE_SIZE must be a valid uint64: %w", err)
+		}
+		cfg.MinPieceSize = n
+	}
+	if v := os.Getenv("MAX_PIECE_SIZE"); v != "" {
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("MAX_PIECE_SIZE must be a valid uint64: %w", err)
+		}
+		cfg.MaxPieceSize = n
+	}
+	if cfg.MinPieceSize > 0 && cfg.MaxPieceSize > 0 && cfg.MinPieceSize > cfg.MaxPieceSize {
+		return nil, fmt.Errorf("MIN_PIECE_SIZE (%d) > MAX_PIECE_SIZE (%d)", cfg.MinPieceSize, cfg.MaxPieceSize)
+	}
+	if v := os.Getenv("MAX_TERM_MAX"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("MAX_TERM_MAX must be a valid int64: %w", err)
+		}
+		cfg.MaxTermMax = n
+	}
+
 	return cfg, nil
 }
 
@@ -141,6 +189,22 @@ func main() {
 	cfg, err := loadConfig()
 	if err != nil {
 		log.Fatalf("Config error: %v", err)
+	}
+
+	if len(cfg.ClientAllowlist) > 0 {
+		addrs := make([]string, 0, len(cfg.ClientAllowlist))
+		for a := range cfg.ClientAllowlist {
+			addrs = append(addrs, a.Hex())
+		}
+		log.Printf("Client allowlist: %s", strings.Join(addrs, ","))
+	} else {
+		log.Printf("Client allowlist: disabled (accepting any client)")
+	}
+	if cfg.MinPieceSize > 0 || cfg.MaxPieceSize > 0 {
+		log.Printf("Piece size bounds: min=%d max=%d (0 = unbounded)", cfg.MinPieceSize, cfg.MaxPieceSize)
+	}
+	if cfg.MaxTermMax > 0 {
+		log.Printf("Max term_max: %d epochs", cfg.MaxTermMax)
 	}
 
 	// Connect to Ethereum RPC (Lotus gateway or public endpoint)
@@ -224,15 +288,41 @@ func pollEvents(ctx context.Context, cfg *config, ethClient *ethclient.Client, f
 
 	log.Printf("Scanning blocks %d to %d", lastBlock+1, currentBlock)
 
-	events, err := fetchAllocationEvents(ctx, ethClient, cfg.ContractAddress, fromBlock, toBlock)
+	events, err := fetchAllocationEvents(ctx, ethClient, cfg.ContractAddress, fromBlock, toBlock, cfg.ProviderID, cfg.ClientAllowlist)
 	if err != nil {
 		log.Printf("ERROR: fetch events: %v", err)
 		return lastBlock
 	}
 
 	for _, evt := range events {
-		// Filter by our provider ID
+		// RPC-side topic filter should already have enforced provider + client,
+		// but double-check in case the RPC misinterprets the filter.
 		if evt.Provider != cfg.ProviderID {
+			log.Printf("WARN: unexpected provider %d in filtered results (expected %d), skipping alloc %d",
+				evt.Provider, cfg.ProviderID, evt.AllocationID)
+			continue
+		}
+		if len(cfg.ClientAllowlist) > 0 {
+			if _, ok := cfg.ClientAllowlist[evt.Client]; !ok {
+				log.Printf("WARN: unexpected client %s in filtered results, skipping alloc %d",
+					evt.Client.Hex(), evt.AllocationID)
+				continue
+			}
+		}
+
+		if cfg.MinPieceSize > 0 && evt.Size < cfg.MinPieceSize {
+			log.Printf("Skipping allocation %d from client %s: size %d below MIN_PIECE_SIZE %d",
+				evt.AllocationID, evt.Client.Hex(), evt.Size, cfg.MinPieceSize)
+			continue
+		}
+		if cfg.MaxPieceSize > 0 && evt.Size > cfg.MaxPieceSize {
+			log.Printf("Skipping allocation %d from client %s: size %d above MAX_PIECE_SIZE %d",
+				evt.AllocationID, evt.Client.Hex(), evt.Size, cfg.MaxPieceSize)
+			continue
+		}
+		if cfg.MaxTermMax > 0 && evt.TermMax > cfg.MaxTermMax {
+			log.Printf("Skipping allocation %d from client %s: term_max %d above MAX_TERM_MAX %d",
+				evt.AllocationID, evt.Client.Hex(), evt.TermMax, cfg.MaxTermMax)
 			continue
 		}
 
