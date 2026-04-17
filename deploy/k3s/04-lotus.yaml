@@ -34,7 +34,7 @@ spec:
   ports:
     - name: api
       port: 1234
-      targetPort: 1234
+      targetPort: lotus-api
 ---
 apiVersion: v1
 kind: Service
@@ -47,7 +47,7 @@ spec:
   ports:
     - name: api
       port: 2345
-      targetPort: 2345
+      targetPort: miner-api
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -136,9 +136,9 @@ spec:
               value: ""
           ports:
             - containerPort: 1234
-              name: api
+              name: lotus-api
             - containerPort: 1235
-              name: libp2p
+              name: lotus-p2p
           volumeMounts:
             - name: lotus-data
               mountPath: /lotus
@@ -244,9 +244,9 @@ spec:
                   optional: true
           ports:
             - containerPort: 2345
-              name: api
+              name: miner-api
             - containerPort: 2346
-              name: libp2p
+              name: miner-p2p
           volumeMounts:
             - name: lotus-data
               mountPath: /lotus
