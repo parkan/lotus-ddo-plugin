@@ -72,7 +72,7 @@ spec:
       containers:
 
         - name: lotus-daemon
-          image: docker.io/filecoin/lotus-all-in-one:v1.34.2-calibnet
+          image: docker.io/filecoin/lotus-all-in-one:v1.35.1-calibnet
           command: [bash, -c]
           args:
             - |
@@ -116,7 +116,7 @@ spec:
                 for f in /wallet-ro/*.key; do
                   [ -f "$f" ] || continue
                   name=$(basename "$f")
-                  lotus wallet import --format=json-lotus "$f" 2>/dev/null \
+                  lotus wallet import --format=hex-lotus "$f" 2>/dev/null \
                     && echo "imported $name" \
                     || echo "$name already imported (or invalid)"
                 done
@@ -170,7 +170,7 @@ spec:
             failureThreshold: 10
 
         - name: lotus-miner
-          image: docker.io/filecoin/lotus-all-in-one:v1.34.2-calibnet
+          image: docker.io/filecoin/lotus-all-in-one:v1.35.1-calibnet
           command: [bash, -c]
           args:
             - |

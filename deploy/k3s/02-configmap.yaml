@@ -13,10 +13,10 @@ metadata:
   namespace: lotus-ddo
 data:
   # Calibnet addresses -- owner and worker of the miner actor.
-  # Leave empty until wallets are generated; miner init waits for both
-  # to appear in the daemon keystore before running.
-  OWNER_ADDR: ""
-  WORKER_ADDR: ""
+  # Generated 2026-04-17 via lotus-shed keyinfo new secp256k1.
+  # Key material lives in the wallet-keys Secret (not committed).
+  OWNER_ADDR: "t1sr5m6xddg7tbi6nurnwprwhi4eci4oioiud2iya"
+  WORKER_ADDR: "t1jjv2shr42mgupwsaamfy3mlkucptdx77c6jyywa"
 
   settings.env: |
     # Calibnet DDO contract.
