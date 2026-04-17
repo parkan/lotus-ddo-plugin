@@ -1,0 +1,68 @@
+# One-shot Job: downloads a calibnet chain snapshot onto the lotus-data
+# PVC so the daemon's first start can do a local file import instead of
+# pulling the snapshot in-process.
+#
+# Apply AFTER the PVCs exist and BEFORE the main Deployment.
+#
+# The Forest archive at chainsafe.dev serves zstd-compressed CAR snapshots
+# that lotus can consume directly (`--import-snapshot=<file>`). The URL
+# returns the latest snapshot; ~8 GiB on disk at time of writing.
+#
+# Also applies PVC provisioning for lotus-data: local-path provisioner
+# binds PVCs on first pod that consumes them, so this Job's pod is the
+# thing that actually creates the backing directory on the NVMe.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: snapshot-download
+  namespace: lotus-ddo
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: snapshot-download
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: downloader
+          image: docker.io/library/debian:bookworm-slim
+          command: [bash, -c]
+          args:
+            - |
+              set -eu
+              apt-get update >/dev/null
+              apt-get install -y --no-install-recommends curl ca-certificates >/dev/null
+              cd /lotus
+
+              if [ -f snapshot.car.zst ] && [ -f snapshot.car.zst.complete ]; then
+                echo "snapshot already present: $(du -h snapshot.car.zst | awk '{print $1}')"
+                exit 0
+              fi
+
+              echo "downloading snapshot from $SNAPSHOT_URL"
+              # --continue-at - allows resume if the Job restarts mid-download.
+              curl -fL --retry 5 --retry-delay 10 --continue-at - \
+                -o snapshot.car.zst "$SNAPSHOT_URL"
+
+              # Sentinel marker so partial downloads aren't re-used.
+              touch snapshot.car.zst.complete
+              echo "snapshot downloaded: $(du -h snapshot.car.zst | awk '{print $1}')"
+          env:
+            - name: SNAPSHOT_URL
+              value: https://forest-archive.chainsafe.dev/latest/calibnet/
+          volumeMounts:
+            - name: lotus-data
+              mountPath: /lotus
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+      volumes:
+        - name: lotus-data
+          persistentVolumeClaim:
+            claimName: lotus-data

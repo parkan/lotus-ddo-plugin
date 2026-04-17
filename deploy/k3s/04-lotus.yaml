@@ -83,10 +83,18 @@ spec:
                 cp /config/lotus-config.toml /lotus/config/config.toml
               fi
 
+              # Prefer locally-staged snapshot file over URL import.
+              # Stage it via 05-snapshot-download.yaml before the daemon starts.
               IMPORT_FLAG=""
-              if [ ! -d /lotus/datastore ] && [ -n "${SNAPSHOT_URL:-}" ]; then
-                echo "chain datastore empty; importing snapshot from $SNAPSHOT_URL"
-                IMPORT_FLAG="--import-snapshot=$SNAPSHOT_URL"
+              SNAPSHOT_FILE="/lotus/snapshot.car.zst"
+              if [ ! -d /lotus/datastore ]; then
+                if [ -f "$SNAPSHOT_FILE" ]; then
+                  echo "chain datastore empty; importing snapshot from $SNAPSHOT_FILE"
+                  IMPORT_FLAG="--import-snapshot=$SNAPSHOT_FILE"
+                elif [ -n "${SNAPSHOT_URL:-}" ]; then
+                  echo "chain datastore empty; importing snapshot from $SNAPSHOT_URL"
+                  IMPORT_FLAG="--import-snapshot=$SNAPSHOT_URL"
+                fi
               fi
 
               # run daemon in background so we can import wallets once API is up
