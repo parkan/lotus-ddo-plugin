@@ -1,0 +1,9 @@
+.git/
+.github/
+deploy/
+downloads/
+*.md
+.env
+.env.local
+Dockerfile
+.dockerignore
