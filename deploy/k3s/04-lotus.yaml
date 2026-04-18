@@ -78,9 +78,9 @@ spec:
             - |
               set -eu
 
-              mkdir -p /lotus/config
-              # always overwrite from configmap so config changes apply on restart
-              cp /config/lotus-config.toml /lotus/config/config.toml
+              # always overwrite from configmap so config changes apply on restart.
+              # lotus reads <LOTUS_PATH>/config.toml (see lotus/node/repo/fsrepo.go).
+              cp /config/lotus-config.toml /lotus/config.toml
 
               # Prefer locally-staged snapshot file over URL import.
               # Stage it via 05-snapshot-download.yaml before the daemon starts.
@@ -175,8 +175,7 @@ spec:
             - |
               set -eu
 
-              mkdir -p /lotus-miner/config
-              cp /config/miner-config.toml /lotus-miner/config/config.toml
+              cp /config/miner-config.toml /lotus-miner/config.toml
 
               echo "waiting for lotus daemon API..."
               until lotus auth api-info --perm admin >/dev/null 2>&1; do
