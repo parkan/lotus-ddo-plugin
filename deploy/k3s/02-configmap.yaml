@@ -49,6 +49,12 @@ data:
     [Libp2p]
       ListenAddresses = ["/ip4/0.0.0.0/tcp/1235"]
 
+    [Fevm]
+      EnableEthRPC = true
+
+    [Events]
+      EnableActorEventsAPI = true
+
     [ChainIndexer]
       EnableIndexer = true
 
