@@ -78,8 +78,6 @@ spec:
             - |
               set -eu
 
-              # always overwrite from configmap so config changes apply on restart.
-              # lotus reads <LOTUS_PATH>/config.toml (see lotus/node/repo/fsrepo.go).
               cp /config/lotus-config.toml /lotus/config.toml
 
               # Prefer locally-staged snapshot file over URL import.
@@ -182,9 +180,6 @@ spec:
                 sleep 10
               done
 
-              # datastore dir exists iff lotus-miner init already ran. api file
-              # is only written by `run`, so using `api` as the init guard
-              # re-triggers init after any mid-run crash -> ErrAlreadyInitialized.
               if [ ! -d /lotus-miner/datastore ]; then
                 : "${OWNER_ADDR:?set OWNER_ADDR in configmap for first-time init}"
                 : "${WORKER_ADDR:?set WORKER_ADDR in configmap for first-time init}"
