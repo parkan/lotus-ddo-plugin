@@ -182,7 +182,10 @@ spec:
                 sleep 10
               done
 
-              if [ ! -f /lotus-miner/api ]; then
+              # datastore dir exists iff lotus-miner init already ran. api file
+              # is only written by `run`, so using `api` as the init guard
+              # re-triggers init after any mid-run crash -> ErrAlreadyInitialized.
+              if [ ! -d /lotus-miner/datastore ]; then
                 : "${OWNER_ADDR:?set OWNER_ADDR in configmap for first-time init}"
                 : "${WORKER_ADDR:?set WORKER_ADDR in configmap for first-time init}"
 
