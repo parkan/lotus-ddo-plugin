@@ -16,7 +16,7 @@ data:
   # Generated 2026-04-17 via lotus-shed keyinfo new secp256k1.
   # Key material lives in the wallet-keys Secret (not committed).
   OWNER_ADDR: "t1em4x3u42xxrdfxsfiblp574lzmltannw26m3yaq"
-  WORKER_ADDR: "t1jjv2shr42mgupwsaamfy3mlkucptdx77c6jyywa"
+  WORKER_ADDR: "t3rhw5rbj3vo4abr6qzgxs3zueuox2mcikfb36kwxrhnqnx5z65ucutpt3wrgctpco2rbedp4kfyftdqezg4fa"
 
   settings.env: |
     # Calibnet DDO contract.
