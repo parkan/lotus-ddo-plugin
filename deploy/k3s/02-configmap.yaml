@@ -27,9 +27,8 @@ data:
     LOTUS_API_URL=http://localhost:1234/rpc/v1
     MINER_API_URL=http://localhost:2345/rpc/v0
 
-    # Filled in after bootstrap -- see comment at top of file.
-    PROVIDER_ID=
-    DDO_CONTRACT_F4=
+    PROVIDER_ID=185851
+    DDO_CONTRACT_F4=t410frcp5kamwxyya2bw4johq6f75wcxvq4evru5nr7q
 
     # Gating. CLIENT_ALLOWLIST: comma-separated 0x addrs of clients whose
     # allocations we accept. Empty = accept any client (NOT recommended).

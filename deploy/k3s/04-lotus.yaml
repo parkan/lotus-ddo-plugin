@@ -130,6 +130,12 @@ spec:
               value: /proof-params
             - name: LOTUS_SKIP_GENESIS_CHECK
               value: "_yes_"
+            # FEVM eth_* RPC endpoints -- required by the ddo-plugin's event
+            # polling (ethclient.FilterLogs → eth_getLogs).
+            - name: LOTUS_FEVM_ENABLEETHRPC
+              value: "true"
+            - name: LOTUS_EVENTS_ENABLEACTOREVENTSAPI
+              value: "true"
             # Optional: calibnet snapshot URL. Leave empty to sync from genesis.
             # Example: https://snapshots.calibrationnet.filops.net/minimal/latest
             - name: SNAPSHOT_URL
