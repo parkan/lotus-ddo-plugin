@@ -58,6 +58,9 @@ data:
     [ChainIndexer]
       EnableIndexer = true
 
+    [Chainstore]
+      EnableSplitstore = true
+
   miner-config.toml: |
     [API]
       ListenAddress = "/ip4/0.0.0.0/tcp/2345/http"
