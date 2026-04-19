@@ -1,0 +1,82 @@
+# Generate a secp256k1 key, import into singularity, then print all derivable
+# address forms (t1, 0x, t410f). t410f is the one we fund for deal-pusher gas.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wallet-init
+  namespace: singularity
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: keygen
+          image: docker.io/filecoin/lotus-all-in-one:v1.35.1-calibnet
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              cd /tmp
+              lotus-shed keyinfo new secp256k1 > /shared/lotus-derived-addr.txt
+              cp secp256k1-*.keyinfo /shared/key.hex
+              echo "lotus-shed derived: $(cat /shared/lotus-derived-addr.txt)"
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+        - name: admin-init
+          image: localhost/singularity:local
+          imagePullPolicy: IfNotPresent
+          command: [/app/singularity]
+          args: [admin, init]
+          env:
+            - name: HOME
+              value: /data
+            - name: DATABASE_CONNECTION_STRING
+              value: sqlite:/data/singularity.db
+            - name: LOTUS_TEST
+              value: "true"
+          volumeMounts:
+            - name: singularity-data
+              mountPath: /data
+        - name: import
+          image: localhost/singularity:local
+          imagePullPolicy: IfNotPresent
+          command: [/app/singularity]
+          args: [wallet, import, /shared/key.hex]
+          env:
+            - name: HOME
+              value: /data
+            - name: DATABASE_CONNECTION_STRING
+              value: sqlite:/data/singularity.db
+            - name: LOTUS_TEST
+              value: "true"
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+            - name: singularity-data
+              mountPath: /data
+      containers:
+        - name: info
+          image: localhost/singularity:local
+          imagePullPolicy: IfNotPresent
+          command: [/app/singularity]
+          args: [wallet, info]
+          env:
+            - name: HOME
+              value: /data
+            - name: DATABASE_CONNECTION_STRING
+              value: sqlite:/data/singularity.db
+            - name: LOTUS_TEST
+              value: "true"
+          volumeMounts:
+            - name: singularity-data
+              mountPath: /data
+      volumes:
+        - name: shared
+          emptyDir: {}
+        - name: singularity-data
+          persistentVolumeClaim:
+            claimName: singularity-data
