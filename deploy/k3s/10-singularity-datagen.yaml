@@ -1,0 +1,36 @@
+# Generate ~31.5 GiB of random bytes into /data/src/random.bin. Source for
+# ez-prep. /dev/urandom throttles at ~100 MB/s so expect ~5-8 min.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: datagen
+  namespace: singularity
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: dd
+          image: docker.io/library/busybox:latest
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              mkdir -p /data/src
+              if [ -s /data/src/random.bin ]; then
+                echo "already present: $(ls -lh /data/src/random.bin)"
+                exit 0
+              fi
+              echo "generating 31.5 GiB of random data..."
+              dd if=/dev/urandom of=/data/src/random.bin bs=1M count=32256
+              echo "done: $(ls -lh /data/src/random.bin)"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: singularity-data

@@ -1,0 +1,45 @@
+# Scans /data/src + packs CARs into /data/cars. Uses the same sqlite db
+# as deal-pusher (/data/singularity.db) so the resulting preparation
+# record is visible to deal-pusher's schedule polling.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ezprep
+  namespace: singularity
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ezprep
+          image: localhost/singularity:local
+          imagePullPolicy: IfNotPresent
+          command: [/app/singularity]
+          args:
+            - ez-prep
+            - --database-file=/data/singularity.db
+            - --output-dir=/data/cars
+            - --concurrency=4
+            - /data/src
+          env:
+            - name: HOME
+              value: /data
+            - name: LOTUS_TEST
+              value: "true"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "2"
+              memory: 2Gi
+            limits:
+              cpu: "16"
+              memory: 16Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: singularity-data
