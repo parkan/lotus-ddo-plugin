@@ -1,0 +1,111 @@
+# content-provider + deal-pusher in one Pod so they share the RWO PVC.
+# content-provider serves piece bytes at /piece/:id on port 7777.
+# deal-pusher has no listener; polls schedules + signs eth txns for DDO.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: content-provider
+  namespace: singularity
+spec:
+  selector:
+    app: singularity
+  ports:
+    - name: http
+      port: 7777
+      targetPort: 7777
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: singularity
+  namespace: singularity
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: singularity
+  template:
+    metadata:
+      labels:
+        app: singularity
+    spec:
+      containers:
+
+        - name: content-provider
+          image: localhost/singularity:local
+          imagePullPolicy: IfNotPresent
+          command: [/app/singularity]
+          args:
+            - run
+            - content-provider
+            - --http-bind=0.0.0.0:7777
+            - --no-automigrate
+          env:
+            - name: HOME
+              value: /data
+            - name: DATABASE_CONNECTION_STRING
+              value: sqlite:/data/singularity.db
+            - name: LOTUS_TEST
+              value: "true"
+          ports:
+            - containerPort: 7777
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "250m"
+              memory: 512Mi
+            limits:
+              cpu: "4"
+              memory: 4Gi
+          readinessProbe:
+            tcpSocket:
+              port: 7777
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+        - name: deal-pusher
+          image: localhost/singularity:local
+          imagePullPolicy: IfNotPresent
+          command: [/app/singularity]
+          args:
+            - run
+            - deal-pusher
+            - --no-automigrate
+          env:
+            - name: HOME
+              value: /data
+            - name: DATABASE_CONNECTION_STRING
+              value: sqlite:/data/singularity.db
+            - name: LOTUS_TEST
+              value: "true"
+            - name: LOTUS_API
+              value: https://api.calibration.node.glif.io/rpc/v1
+            - name: ETH_RPC_URL
+              value: https://api.calibration.node.glif.io/rpc/v1
+            - name: DDO_CONTRACT_ADDRESS
+              value: "0x889fD50196BE300D06dc4b8F0F17fdB0af587095"
+            - name: DDO_PAYMENTS_CONTRACT_ADDRESS
+              value: "0x09a0fDc2723fAd1A7b8e3e00eE5DF73841df55a0"
+            - name: DDO_PAYMENT_TOKEN
+              value: "0xb3042734b608a1b16e9e86b374a3f3e389b4cdf0"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "250m"
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: singularity-data
